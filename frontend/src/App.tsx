@@ -33,7 +33,8 @@ export const App: React.FC = () => {
       } else {
         // Attempt live API call to backend Lambda / API Gateway
         try {
-          const res = await fetch("/api/scan");
+          const apiBaseUrl = (import.meta.env.VITE_API_URL || "").replace(/\/+$/, "");
+          const res = await fetch(`${apiBaseUrl}/api/scan`);
           if (res.ok) {
             const data: ScanApiResponse = await res.json();
             setScanData(data);

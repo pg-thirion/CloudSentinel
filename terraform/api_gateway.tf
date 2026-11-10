@@ -1,14 +1,9 @@
 # HTTP API Gateway for CloudSentinel
+# Note: CORS is handled directly in backend/lambda_handler.py to prevent duplicate
+# 'Access-Control-Allow-Origin: *, *' header concatenation by API Gateway HTTP API v2.
 resource "aws_apigatewayv2_api" "http_api" {
   name          = "${var.app_name}-gateway-${var.environment}"
   protocol_type = "HTTP"
-
-  cors_configuration {
-    allow_origins = ["*"]
-    allow_methods = ["GET", "POST", "OPTIONS"]
-    allow_headers = ["Content-Type", "Authorization", "X-Requested-With"]
-    max_age       = 300
-  }
 }
 
 resource "aws_apigatewayv2_stage" "default" {

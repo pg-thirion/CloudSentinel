@@ -335,7 +335,7 @@ class TestExposedSecurityGroupsSafe:
         assert len(findings) == 1
         finding = findings[0]
         assert finding.status == Status.PASS
-        assert finding.severity == Severity.LOW
+        assert finding.severity == Severity.CRITICAL
         assert finding.resource_id == sg_id
         assert "compliant ingress rules" in finding.status_extended
         assert finding.check_id == "ec2_securitygroup_safe_ingress"
@@ -381,7 +381,7 @@ class TestExposedSecurityGroupsSafe:
         assert len(findings) == 1
         finding = findings[0]
         assert finding.status == Status.PASS
-        assert finding.severity == Severity.LOW
+        assert finding.severity == Severity.CRITICAL
         assert finding.resource_id == sg_id
 
     @mock_aws
@@ -405,7 +405,29 @@ class TestExposedSecurityGroupsSafe:
         assert len(findings) == 1
         finding = findings[0]
         assert finding.status == Status.PASS
-        assert finding.severity == Severity.LOW
+        assert finding.severity == Severity.CRITICAL
+
+    def test_covers_port_half_bounded_exact_match(self, check):
+        """
+        Verify half-bounded rules do not cause false positives (Finding 11).
+        """
+        # Port 80 from_port only should not match port 3389
+        assert check._covers_port("tcp", from_port=80, to_port=None, target_port=3389) is False
+        assert check._covers_port("tcp", from_port=22, to_port=None, target_port=22) is True
+        # Port 80 to_port only should not match port 22
+        assert check._covers_port("tcp", from_port=None, to_port=80, target_port=22) is False
+        assert check._covers_port("tcp", from_port=None, to_port=22, target_port=22) is True
+
+    def test_covers_port_half_bounded_exact_match(self, check):
+        """
+        Verify half-bounded rules do not cause false positives (Finding 11).
+        """
+        # Port 80 from_port only should not match port 3389
+        assert check._covers_port("tcp", from_port=80, to_port=None, target_port=3389) is False
+        assert check._covers_port("tcp", from_port=22, to_port=None, target_port=22) is True
+        # Port 80 to_port only should not match port 22
+        assert check._covers_port("tcp", from_port=None, to_port=80, target_port=22) is False
+        assert check._covers_port("tcp", from_port=None, to_port=22, target_port=22) is True
 
 
 # ==============================================================================

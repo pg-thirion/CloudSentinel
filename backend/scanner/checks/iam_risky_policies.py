@@ -544,6 +544,22 @@ class IAMRiskyPoliciesCheck(BaseCheck):
                 return True
         return False
 
+    RESTRICTIVE_CONDITION_KEYS = {
+        "aws:principalaccount",
+        "aws:principalarn",
+        "aws:principalorgid",
+        "aws:principalorgpaths",
+        "aws:sourceaccount",
+        "aws:sourcearn",
+        "aws:sourceowner",
+        "aws:sourcevpc",
+        "aws:sourcevpce",
+        "aws:sourceip",
+        "aws:userid",
+        "aws:multifactorauthpresent",
+        "aws:requestedregion",
+    }
+
     def _is_restrictive_condition(self, condition: Any) -> bool:
         """
         Checks if condition dictionary contains restrictive constraints
@@ -551,8 +567,16 @@ class IAMRiskyPoliciesCheck(BaseCheck):
         """
         if not condition or not isinstance(condition, dict) or len(condition) == 0:
             return False
-        # Condition block has one or more condition operators
-        return True
+
+        for op, keys in condition.items():
+            if isinstance(keys, dict):
+                for key in keys.keys():
+                    key_lower = key.lower().strip()
+                    if key_lower in self.RESTRICTIVE_CONDITION_KEYS:
+                        return True
+                    if any(r_key in key_lower for r_key in self.RESTRICTIVE_CONDITION_KEYS):
+                        return True
+        return False
 
     # -------------------------------------------------------------------------
     # Remediation Builders

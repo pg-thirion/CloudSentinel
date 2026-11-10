@@ -179,12 +179,18 @@ class S3PublicAccessCheck(BaseCheck):
                     # Do not abort bucket audit if only location is denied; default to us-east-1 and continue
                     region = "us-east-1"
                 else:
-                    raise
+                    region = "us-east-1"
+
+            # Use regional client to prevent 301 PermanentRedirect on non-us-east-1 buckets
+            try:
+                bucket_s3 = session.client("s3", region_name=region)
+            except Exception:
+                bucket_s3 = s3
 
             # Check Public Access Block
             pab_failures = []
             try:
-                pab_resp = s3.get_public_access_block(Bucket=bucket_name)
+                pab_resp = bucket_s3.get_public_access_block(Bucket=bucket_name)
                 pab_config = pab_resp.get("PublicAccessBlockConfiguration", {})
                 for flag in ("BlockPublicAcls", "IgnorePublicAcls", "BlockPublicPolicy", "RestrictPublicBuckets"):
                     if not pab_config.get(flag, False):
@@ -211,12 +217,27 @@ class S3PublicAccessCheck(BaseCheck):
                 elif err_code == "NoSuchPublicAccessBlockConfiguration":
                     pab_failures.append("Public Access Block is not configured")
                 else:
-                    raise
+                    findings.append(
+                        Finding(
+                            check_id=self.check_id,
+                            check_title=self.check_title,
+                            service=self.service,
+                            severity=self.severity,
+                            status=Status.ERROR,
+                            status_extended=f"Error checking Public Access Block on bucket '{bucket_name}': {err_code} - {e.response.get('Error', {}).get('Message', str(e))}",
+                            resource_id=bucket_name,
+                            resource_arn=bucket_arn,
+                            region=region,
+                            remediation=self._build_remediation(bucket_name),
+                            compliance=self.compliance,
+                        )
+                    )
+                    continue
 
             # Check Bucket Policy
             public_policy_statements = []
             try:
-                pol_resp = s3.get_bucket_policy(Bucket=bucket_name)
+                pol_resp = bucket_s3.get_bucket_policy(Bucket=bucket_name)
                 policy_raw = pol_resp.get("Policy", "{}")
                 policy_doc = json.loads(policy_raw) if isinstance(policy_raw, str) else policy_raw
                 statements = policy_doc.get("Statement", [])
@@ -254,12 +275,27 @@ class S3PublicAccessCheck(BaseCheck):
                 elif err_code == "NoSuchBucketPolicy":
                     pass
                 else:
-                    raise
+                    findings.append(
+                        Finding(
+                            check_id=self.check_id,
+                            check_title=self.check_title,
+                            service=self.service,
+                            severity=self.severity,
+                            status=Status.ERROR,
+                            status_extended=f"Error checking policy on bucket '{bucket_name}': {err_code} - {e.response.get('Error', {}).get('Message', str(e))}",
+                            resource_id=bucket_name,
+                            resource_arn=bucket_arn,
+                            region=region,
+                            remediation=self._build_remediation(bucket_name),
+                            compliance=self.compliance,
+                        )
+                    )
+                    continue
 
             # Check Bucket ACL
             public_acl_grants = []
             try:
-                acl_resp = s3.get_bucket_acl(Bucket=bucket_name)
+                acl_resp = bucket_s3.get_bucket_acl(Bucket=bucket_name)
                 grants = acl_resp.get("Grants", [])
                 for grant in grants:
                     grantee = grant.get("Grantee", {})
@@ -288,7 +324,22 @@ class S3PublicAccessCheck(BaseCheck):
                     )
                     continue
                 else:
-                    raise
+                    findings.append(
+                        Finding(
+                            check_id=self.check_id,
+                            check_title=self.check_title,
+                            service=self.service,
+                            severity=self.severity,
+                            status=Status.ERROR,
+                            status_extended=f"Error checking ACL on bucket '{bucket_name}': {err_code} - {e.response.get('Error', {}).get('Message', str(e))}",
+                            resource_id=bucket_name,
+                            resource_arn=bucket_arn,
+                            region=region,
+                            remediation=self._build_remediation(bucket_name),
+                            compliance=self.compliance,
+                        )
+                    )
+                    continue
 
             # Consolidate Findings
             vulnerabilities = []

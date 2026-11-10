@@ -47,8 +47,12 @@ export const FindingsTable: React.FC<FindingsTableProps> = ({
 
       // Severity filter
       if (selectedSeverity !== "ALL") {
-        if (selectedSeverity === "PASS" && f.status !== "PASS") return false;
-        if (selectedSeverity !== "PASS" && f.severity !== selectedSeverity) return false;
+        if (selectedSeverity === "PASS") {
+          if (f.status !== "PASS") return false;
+        } else {
+          // Severity cards represent failing/vulnerable findings
+          if (f.severity !== selectedSeverity || f.status === "PASS") return false;
+        }
       }
 
       // Status filter
@@ -209,11 +213,13 @@ export const FindingsTable: React.FC<FindingsTableProps> = ({
                   {/* Severity */}
                   <td className="py-3.5 px-4 whitespace-nowrap">
                     <span
-                      className={`inline-block px-2 py-0.5 rounded text-[11px] font-extrabold border ${getSeverityBadge(
-                        finding.severity
-                      )}`}
+                      className={`inline-block px-2 py-0.5 rounded text-[11px] font-extrabold border ${
+                        finding.status === "PASS"
+                          ? "bg-emerald-950/40 text-emerald-400 border-emerald-800/60"
+                          : getSeverityBadge(finding.severity)
+                      }`}
                     >
-                      {finding.severity}
+                      {finding.status === "PASS" ? "COMPLIANT" : finding.severity}
                     </span>
                   </td>
 

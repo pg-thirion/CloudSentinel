@@ -17,6 +17,7 @@ def test_credential_protector_redaction():
     redacted = CredentialProtector.redact(leak_sample)
     assert "wJalrXUtn" not in redacted
     assert "FwoGZXIvYXdz" not in redacted
+    assert "AKIAIOSFODNN7EXAMPLE" not in redacted
     assert "[REDACTED]" in redacted
 
 

@@ -192,9 +192,15 @@ class S3DefaultEncryptionCheck(BaseCheck):
             except botocore.exceptions.ClientError:
                 pass
 
+            # Use regional client to prevent 301 PermanentRedirect on non-us-east-1 buckets
+            try:
+                bucket_s3 = session.client("s3", region_name=region)
+            except Exception:
+                bucket_s3 = s3
+
             # Inspect default encryption configuration
             try:
-                enc_resp = s3.get_bucket_encryption(Bucket=bucket_name)
+                enc_resp = bucket_s3.get_bucket_encryption(Bucket=bucket_name)
                 rules = enc_resp.get("ServerSideEncryptionConfiguration", {}).get("Rules", [])
                 
                 valid_encryption = False
@@ -287,7 +293,21 @@ class S3DefaultEncryptionCheck(BaseCheck):
                         )
                     )
                 else:
-                    raise
+                    findings.append(
+                        Finding(
+                            check_id=self.check_id,
+                            check_title=self.check_title,
+                            service=self.service,
+                            severity=self.severity,
+                            status=Status.ERROR,
+                            status_extended=f"Error checking encryption for bucket '{bucket_name}': {err_code} - {err_msg}",
+                            resource_id=bucket_name,
+                            resource_arn=bucket_arn,
+                            region=region,
+                            remediation=self._build_fail_remediation(bucket_name),
+                            compliance=self.compliance,
+                        )
+                    )
 
         return findings
 
@@ -369,10 +389,10 @@ class EBSVolumeEncryptionCheck(BaseCheck):
         target_regions = regions or self.regions or _get_active_regions(session)
         account_id = _get_account_id(session)
 
-        def _audit_ebs_region(reg: str) -> List[Finding]:
+        def _audit_ebs_region(reg: str, ec2_client=None) -> List[Finding]:
             reg_findings = []
             try:
-                ec2 = session.client("ec2", region_name=reg)
+                ec2 = ec2_client or session.client("ec2", region_name=reg)
                 volumes = self._get_volumes(ec2)
             except botocore.exceptions.ClientError as e:
                 err_code = e.response.get("Error", {}).get("Code", "ClientError")
@@ -450,8 +470,9 @@ class EBSVolumeEncryptionCheck(BaseCheck):
             for r in target_regions:
                 findings.extend(_audit_ebs_region(r))
         else:
+            regional_clients = {r: session.client("ec2", region_name=r) for r in target_regions}
             with ThreadPoolExecutor(max_workers=min(8, len(target_regions))) as executor:
-                for r_findings in executor.map(_audit_ebs_region, target_regions):
+                for r_findings in executor.map(lambda r: _audit_ebs_region(r, ec2_client=regional_clients[r]), target_regions):
                     findings.extend(r_findings)
 
         return findings
@@ -537,10 +558,10 @@ class RDSInstanceEncryptionCheck(BaseCheck):
         target_regions = regions or self.regions or _get_active_regions(session)
         account_id = _get_account_id(session)
 
-        def _audit_rds_region(reg: str) -> List[Finding]:
+        def _audit_rds_region(reg: str, rds_client=None) -> List[Finding]:
             reg_findings = []
             try:
-                rds = session.client("rds", region_name=reg)
+                rds = rds_client or session.client("rds", region_name=reg)
                 instances = self._get_instances(rds)
             except botocore.exceptions.ClientError as e:
                 err_code = e.response.get("Error", {}).get("Code", "ClientError")
@@ -612,8 +633,9 @@ class RDSInstanceEncryptionCheck(BaseCheck):
             for r in target_regions:
                 findings.extend(_audit_rds_region(r))
         else:
+            regional_clients = {r: session.client("rds", region_name=r) for r in target_regions}
             with ThreadPoolExecutor(max_workers=min(8, len(target_regions))) as executor:
-                for r_findings in executor.map(_audit_rds_region, target_regions):
+                for r_findings in executor.map(lambda r: _audit_rds_region(r, rds_client=regional_clients[r]), target_regions):
                     findings.extend(r_findings)
 
         return findings

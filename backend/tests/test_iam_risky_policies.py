@@ -620,6 +620,31 @@ class TestDocumentParsingAndThreatScore:
         # Because it has a restrictive MFA condition, it does not flag as unrestricted admin wildcard (*:*)
         assert finding.check_id != "iam_policy_wildcard_administrative_access"
 
+    def test_admin_wildcard_with_non_restrictive_condition_flags(self, iam_check):
+        """Wildcard policy with trivial non-security condition must still flag as admin wildcard (Finding 8)."""
+        doc = {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Action": "*",
+                    "Resource": "*",
+                    "Condition": {
+                        "StringEquals": {"s3:prefix": "home/"}
+                    },
+                }
+            ],
+        }
+
+        finding = iam_check.evaluate_policy(
+            policy_name="DummyConditionAdmin",
+            policy_arn="arn:aws:iam::123456789012:policy/DummyConditionAdmin",
+            document=doc,
+        )
+
+        assert finding.status == Status.FAIL
+        assert finding.check_id == "iam_policy_wildcard_administrative_access"
+
     def test_invalid_document_strings(self, iam_check):
         """Malformed document strings parse to empty dictionary without raising exceptions."""
         finding = iam_check.evaluate_policy(

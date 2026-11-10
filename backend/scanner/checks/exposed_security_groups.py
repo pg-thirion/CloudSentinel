@@ -80,85 +80,6 @@ class ExposedSecurityGroupsCheck(BaseCheck):
         "PCI-DSS-4.0:1.3.1",
     ]
 
-    def execute(self, session, group_ids: Optional[List[str]] = None) -> List[Finding]:
-        """Wrapper ensuring AccessDenied and errors are captured cleanly without crashing."""
-        try:
-            return self.run_check(session, group_ids=group_ids)
-        except botocore.exceptions.ClientError as e:
-            error_code = e.response.get("Error", {}).get("Code", "ClientError")
-            error_message = e.response.get("Error", {}).get("Message", str(e))
-            region = getattr(session, "region_name", "us-east-1") or "us-east-1"
-
-            if error_code in ("AccessDenied", "AccessDeniedException", "UnauthorizedOperation", "ForbiddenException"):
-                return [
-                    Finding(
-                        check_id=self.check_id,
-                        check_title=self.check_title,
-                        service=self.service,
-                        severity=self.severity,
-                        status=Status.ACCESS_DENIED,
-                        status_extended=f"Access Denied executing check: {error_code} - {error_message}",
-                        resource_id=f"arn:aws:ec2:{region}:::security-group/*",
-                        resource_arn=f"arn:aws:ec2:{region}:::security-group/*",
-                        region=region,
-                        remediation=Remediation(
-                            description="Insufficient IAM permissions to audit EC2 security groups.",
-                            recommendation="Grant ec2:DescribeSecurityGroups or SecurityAudit policy to CloudSentinel IAM execution role.",
-                            cli_command="aws iam attach-role-policy --role-name ScannerRole --policy-arn arn:aws:iam::aws:policy/SecurityAudit",
-                            terraform_fix=(
-                                "resource \"aws_iam_role_policy_attachment\" \"security_audit\" {\n"
-                                "  role       = aws_iam_role.scanner.name\n"
-                                "  policy_arn = \"arn:aws:iam::aws:policy/SecurityAudit\"\n"
-                                "}"
-                            ),
-                            documentation_url="https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/security-iam.html",
-                        ),
-                        compliance=self.compliance,
-                    )
-                ]
-            else:
-                return [
-                    Finding(
-                        check_id=self.check_id,
-                        check_title=self.check_title,
-                        service=self.service,
-                        severity=self.severity,
-                        status=Status.ERROR,
-                        status_extended=f"Error executing check: {error_code} - {error_message}",
-                        resource_id=f"arn:aws:ec2:{region}:::security-group/*",
-                        resource_arn=f"arn:aws:ec2:{region}:::security-group/*",
-                        region=region,
-                        remediation=Remediation(
-                            description="API error during security group evaluation.",
-                            recommendation="Verify AWS service availability and credentials.",
-                            cli_command="aws sts get-caller-identity",
-                            terraform_fix="",
-                        ),
-                        compliance=self.compliance,
-                    )
-                ]
-        except Exception as e:
-            return [
-                Finding(
-                    check_id=self.check_id,
-                    check_title=self.check_title,
-                    service=self.service,
-                    severity=self.severity,
-                    status=Status.ERROR,
-                    status_extended=f"Unexpected scanner exception: {str(e)}",
-                    resource_id=f"arn:aws:ec2:::security-group/*",
-                    resource_arn=f"arn:aws:ec2:::security-group/*",
-                    region="global",
-                    remediation=Remediation(
-                        description="Internal scanner error.",
-                        recommendation="Review execution logs.",
-                        cli_command="",
-                        terraform_fix="",
-                    ),
-                    compliance=self.compliance,
-                )
-            ]
-
     def _get_active_regions(self, session) -> List[str]:
         """Retrieve active/opted-in AWS regions across the account."""
         session_region = getattr(session, "region_name", None) or "us-east-1"
@@ -183,13 +104,15 @@ class ExposedSecurityGroupsCheck(BaseCheck):
             return self._audit_region(session, reg)
 
         findings: List[Finding] = []
+        # Pre-instantiate regional clients sequentially to ensure thread-safety with boto3.Session
+        regional_clients = {r: session.client("ec2", region_name=r) for r in target_regions}
         with ThreadPoolExecutor(max_workers=min(8, len(target_regions))) as executor:
-            for reg_findings in executor.map(lambda r: self._audit_region(session, r), target_regions):
+            for reg_findings in executor.map(lambda r: self._audit_region(session, r, ec2_client=regional_clients[r]), target_regions):
                 findings.extend(reg_findings)
         return findings
 
-    def _audit_region(self, session, region: str, group_ids: Optional[List[str]] = None) -> List[Finding]:
-        ec2 = session.client("ec2", region_name=region)
+    def _audit_region(self, session, region: str, group_ids: Optional[List[str]] = None, ec2_client=None) -> List[Finding]:
+        ec2 = ec2_client or session.client("ec2", region_name=region)
         findings: List[Finding] = []
 
         try:
@@ -379,7 +302,7 @@ class ExposedSecurityGroupsCheck(BaseCheck):
                         check_id="ec2_securitygroup_safe_ingress",
                         check_title="Ensure Security Group Ingress Is Restricted",
                         service=self.service,
-                        severity=Severity.LOW,
+                        severity=Severity.CRITICAL,
                         status=Status.PASS,
                         status_extended=f"Security group '{group_id}' ({group_name}) has compliant ingress rules: no sensitive ports or all-traffic open to 0.0.0.0/0 or ::/0.",
                         resource_id=group_id,
@@ -492,9 +415,9 @@ class ExposedSecurityGroupsCheck(BaseCheck):
             return from_port <= target_port <= to_port
 
         if from_port is not None:
-            return from_port <= target_port
+            return from_port == target_port
 
         if to_port is not None:
-            return target_port <= to_port
+            return target_port == to_port
 
         return False

@@ -16,18 +16,24 @@ from .checks.exposed_security_groups import ExposedSecurityGroupsCheck
 
 class CredentialProtector:
     """Ensures no AWS secret keys, session tokens, or sensitive values leak in logs or output."""
-    SENSITIVE_PATTERNS = [
+    PREFIX_PATTERNS = [
         re.compile(r'(aws_secret_access_key\s*=\s*)([^\s]+)', re.IGNORECASE),
         re.compile(r'(aws_session_token\s*=\s*)([^\s]+)', re.IGNORECASE),
-        re.compile(r'(AKIA[0-9A-Z]{16})', re.IGNORECASE),
-        re.compile(r'(ASIA[0-9A-Z]{16})', re.IGNORECASE),
+    ]
+    KEY_PATTERNS = [
+        re.compile(r'\b(AKIA[0-9A-Z]{16})\b', re.IGNORECASE),
+        re.compile(r'\b(ASIA[0-9A-Z]{16})\b', re.IGNORECASE),
     ]
 
     @classmethod
     def redact(cls, text: str) -> str:
+        if not text:
+            return ""
         redacted = text
-        for pattern in cls.SENSITIVE_PATTERNS:
+        for pattern in cls.PREFIX_PATTERNS:
             redacted = pattern.sub(r'\1[REDACTED]', redacted)
+        for pattern in cls.KEY_PATTERNS:
+            redacted = pattern.sub(r'[REDACTED]', redacted)
         return redacted
 
 
