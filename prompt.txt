@@ -1,0 +1,9 @@
+Build CloudSentinel, an AWS security scanning webapp using React, TypeScript, Python, boto3, AWS Lambda and Terraform. Detect public S3 access, risky IAM policies, missing encryption and exposed security group ports. Show a security score, severity levels, affected resources and recommended fixes.
+
+The bar is Prowler: https://prowler.com/overview for published dashboard visuals and https://github.com/prowler-cloud/prowler for corresponding AWS checks and tests. Fetch the actual references first. Compare only the requested scope.
+
+Require passing tests for vulnerable, safe and access-denied cases in all four detection categories. Explain the score calculation. Use read-only AWS access, protect credentials and distinguish incomplete scans from healthy results.
+
+Break the work into small, independently judgeable pieces. Give each a builder and a separate harsh critic with fresh context. The critic inspects working output, compares it blind against the reference with labels stripped, chooses the winner and identifies the biggest remaining gap. Return that gap to the builder.
+
+Keep a live progress page. Keep looping until our version wins and the tests pass. Run independent builders and critics as parallel subagents.
