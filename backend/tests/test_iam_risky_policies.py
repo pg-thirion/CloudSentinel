@@ -386,16 +386,13 @@ class TestSafeIAMPolicies:
     def test_safe_empty_account_customer_policies(self, aws_credentials, iam_check):
         """
         Test Case 2C: Account with zero customer managed policies.
-        Must return a PASS finding indicating clean posture.
+        Must return empty list cleanly without error, matching S3, EC2, EBS, and RDS behavior.
         """
         with moto.mock_aws():
             session = boto3.Session(region_name="us-east-1")
             findings = iam_check.run_check(session)
 
-            assert len(findings) == 1
-            f = findings[0]
-            assert f.status == Status.PASS
-            assert "no customer managed iam policies" in f.status_extended.lower()
+            assert findings == []
 
     def test_deny_statements_are_not_flagged_as_vulnerable(self, iam_check):
         """
@@ -662,7 +659,29 @@ class TestDocumentParsingAndThreatScore:
         mock_iam.get_paginator.side_effect = botocore.exceptions.OperationNotPageableError(
             operation_name="list_policies"
         )
-        mock_iam.list_policies.return_value = {"Policies": []}
+        mock_iam.list_policies.return_value = {
+            "Policies": [
+                {
+                    "Arn": "arn:aws:iam::123456789012:policy/CustomReadOnly",
+                    "PolicyName": "CustomReadOnly",
+                    "DefaultVersionId": "v1",
+                }
+            ]
+        }
+        mock_iam.get_policy_version.return_value = {
+            "PolicyVersion": {
+                "Document": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Action": "s3:GetObject",
+                            "Resource": "*",
+                        }
+                    ],
+                }
+            }
+        }
 
         findings = iam_check.run_check(mock_session)
         assert len(findings) == 1

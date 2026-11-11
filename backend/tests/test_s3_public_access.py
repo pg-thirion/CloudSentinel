@@ -777,3 +777,63 @@ def test_execute_wrapper_handles_unexpected_client_error(check):
         assert "InternalError" in findings[0].status_extended
     finally:
         stubber.deactivate()
+
+
+def test_vulnerable_not_principal_bucket_policy(aws_credentials, check):
+    """Test that bucket policy using Effect: Allow with NotPrincipal is flagged as FAIL."""
+    with mock_aws():
+        session = boto3.Session(region_name="us-east-1")
+        s3 = session.client("s3", region_name="us-east-1")
+        bucket_name = "vuln-not-principal-bucket"
+        s3.create_bucket(Bucket=bucket_name)
+
+        not_principal_policy = {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Sid": "AllowAllExceptOne",
+                    "Effect": "Allow",
+                    "NotPrincipal": {"AWS": "arn:aws:iam::123456789012:user/excluded"},
+                    "Action": "s3:GetObject",
+                    "Resource": f"arn:aws:s3:::{bucket_name}/*",
+                }
+            ],
+        }
+        s3.put_bucket_policy(Bucket=bucket_name, Policy=json.dumps(not_principal_policy))
+
+        findings = check.run_check(session)
+        assert len(findings) == 1
+        assert findings[0].status == Status.FAIL
+        assert "NotPrincipal" in findings[0].status_extended
+
+
+def test_wildcard_condition_value_does_not_pass(aws_credentials, check):
+    """Test that condition block with wildcard value ('*') does not count as restrictive."""
+    with mock_aws():
+        session = boto3.Session(region_name="us-east-1")
+        s3 = session.client("s3", region_name="us-east-1")
+        bucket_name = "vuln-wildcard-condition-bucket"
+        s3.create_bucket(Bucket=bucket_name)
+
+        wildcard_cond_policy = {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Sid": "WildcardConditionAllow",
+                    "Effect": "Allow",
+                    "Principal": "*",
+                    "Action": "s3:GetObject",
+                    "Resource": f"arn:aws:s3:::{bucket_name}/*",
+                    "Condition": {
+                        "StringEquals": {
+                            "aws:PrincipalArn": "*"
+                        }
+                    },
+                }
+            ],
+        }
+        s3.put_bucket_policy(Bucket=bucket_name, Policy=json.dumps(wildcard_cond_policy))
+
+        findings = check.run_check(session)
+        assert len(findings) == 1
+        assert findings[0].status == Status.FAIL

@@ -28,14 +28,16 @@ export const RemediationModal: React.FC<RemediationModalProps> = ({ finding, onC
             <div className="flex items-center space-x-2">
               <span
                 className={`text-[11px] font-extrabold px-2 py-0.5 rounded border ${
-                  finding.severity === "CRITICAL"
+                  finding.status === "PASS"
+                    ? "bg-emerald-950 text-emerald-400 border-emerald-800"
+                    : finding.severity === "CRITICAL"
                     ? "bg-red-950 text-red-400 border-red-800"
                     : finding.severity === "HIGH"
                     ? "bg-amber-950 text-amber-400 border-amber-800"
                     : "bg-blue-950 text-blue-400 border-blue-800"
                 }`}
               >
-                {finding.severity}
+                {finding.status === "PASS" ? "COMPLIANT" : finding.severity}
               </span>
               <span className="text-xs font-bold uppercase tracking-wider text-gray-400">
                 {finding.service.toUpperCase()} POSTURE AUDIT

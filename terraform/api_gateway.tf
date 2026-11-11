@@ -42,6 +42,7 @@ resource "aws_apigatewayv2_integration" "lambda_integration" {
   integration_uri        = aws_lambda_function.cloudsentinel_scanner.invoke_arn
   integration_method     = "POST"
   payload_format_version = "2.0"
+  timeout_milliseconds   = 29000
 }
 
 # Catch-all and specific routes proxying to Lambda

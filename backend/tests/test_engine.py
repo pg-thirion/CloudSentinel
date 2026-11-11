@@ -11,6 +11,8 @@ from backend.scanner.models import Finding, Severity, Status, Remediation
 def test_credential_protector_redaction():
     leak_sample = (
         "Config: aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY and "
+        "SecretAccessKey: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY and "
+        '{"aws_secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"} and '
         "aws_session_token = FwoGZXIvYXdzEEXAMPLETOKEN and "
         "key ID AKIAIOSFODNN7EXAMPLE"
     )
@@ -49,7 +51,7 @@ def test_engine_verify_read_only_with_valid_credentials():
 
     assert result["valid"] is True
     assert result["account_masked"] == "1234****9012"
-    assert result["arn"] == "arn:aws:iam::123456789012:role/ScannerRole"
+    assert result["arn"] == "arn:aws:iam::1234****9012:role/ScannerRole"
 
 
 def test_engine_run_all_checks_aggregates_findings():

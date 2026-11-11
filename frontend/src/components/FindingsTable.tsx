@@ -50,8 +50,7 @@ export const FindingsTable: React.FC<FindingsTableProps> = ({
         if (selectedSeverity === "PASS") {
           if (f.status !== "PASS") return false;
         } else {
-          // Severity cards represent failing/vulnerable findings
-          if (f.severity !== selectedSeverity || f.status === "PASS") return false;
+          if (f.severity !== selectedSeverity) return false;
         }
       }
 

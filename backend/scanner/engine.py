@@ -6,7 +6,7 @@ and computes ThreatScore & completeness metrics.
 import re
 import boto3
 from typing import List, Dict, Any, Optional
-from .models import Finding, Status, Severity, Remediation
+from .models import Finding, Status, Severity, Remediation, CredentialProtector
 from .scoring import compute_scan_summary
 from .checks.s3_public_access import S3PublicAccessCheck
 from .checks.iam_risky_policies import IAMRiskyPoliciesCheck
@@ -14,39 +14,17 @@ from .checks.missing_encryption import MissingEncryptionCheck
 from .checks.exposed_security_groups import ExposedSecurityGroupsCheck
 
 
-class CredentialProtector:
-    """Ensures no AWS secret keys, session tokens, or sensitive values leak in logs or output."""
-    PREFIX_PATTERNS = [
-        re.compile(r'(aws_secret_access_key\s*=\s*)([^\s]+)', re.IGNORECASE),
-        re.compile(r'(aws_session_token\s*=\s*)([^\s]+)', re.IGNORECASE),
-    ]
-    KEY_PATTERNS = [
-        re.compile(r'\b(AKIA[0-9A-Z]{16})\b', re.IGNORECASE),
-        re.compile(r'\b(ASIA[0-9A-Z]{16})\b', re.IGNORECASE),
-    ]
-
-    @classmethod
-    def redact(cls, text: str) -> str:
-        if not text:
-            return ""
-        redacted = text
-        for pattern in cls.PREFIX_PATTERNS:
-            redacted = pattern.sub(r'\1[REDACTED]', redacted)
-        for pattern in cls.KEY_PATTERNS:
-            redacted = pattern.sub(r'[REDACTED]', redacted)
-        return redacted
-
-
 class CloudSentinelEngine:
     """Main scanning engine that coordinates security checks with read-only assurance."""
 
-    def __init__(self, session: Optional[boto3.Session] = None):
+    def __init__(self, session: Optional[boto3.Session] = None, target_regions: Optional[List[str]] = None):
         self.session = session or boto3.Session()
+        self.target_regions = target_regions
         self.checks = [
             S3PublicAccessCheck(),
             IAMRiskyPoliciesCheck(),
-            MissingEncryptionCheck(),
-            ExposedSecurityGroupsCheck(),
+            MissingEncryptionCheck(regions=target_regions),
+            ExposedSecurityGroupsCheck(regions=target_regions),
         ]
 
     def verify_read_only_access(self) -> Dict[str, Any]:
@@ -66,10 +44,12 @@ class CloudSentinelEngine:
             # Mask account ID for privacy (e.g. 1234****9012)
             acc = caller.get("Account", "000000000000")
             masked_acc = f"{acc[:4]}****{acc[-4:]}" if len(acc) >= 8 else "****"
+            raw_arn = caller.get("Arn", "unknown")
+            masked_arn = raw_arn.replace(acc, masked_acc) if acc and acc != "000000000000" else raw_arn
             return {
                 "valid": True,
                 "account_masked": masked_acc,
-                "arn": caller.get("Arn", "unknown"),
+                "arn": masked_arn,
                 "user_id": caller.get("UserId", "unknown"),
                 "read_only": True,
             }

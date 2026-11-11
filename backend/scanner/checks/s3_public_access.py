@@ -63,12 +63,24 @@ class S3PublicAccessCheck(BaseCheck):
                     return True
         return False
 
+    @staticmethod
+    def _is_wildcard_condition_value(val: Any) -> bool:
+        """Check if condition value is wildcard (* or empty) providing zero real restriction."""
+        if val is None or val == "" or val == "*" or val == ["*"]:
+            return True
+        if isinstance(val, (list, tuple, set)):
+            return any(S3PublicAccessCheck._is_wildcard_condition_value(v) for v in val)
+        if isinstance(val, str) and val.strip() == "*":
+            return True
+        return False
+
     def _has_restrictive_condition(self, condition: Any, effect: str = "Allow") -> bool:
         """
         Check if condition block constrains wildcard principal access to specific accounts/orgs/networks.
         When effect is Allow, negative operators (e.g. StringNotEquals, ArnNotEquals, NotIpAddress,
         StringNotEqualsIfExists) invert logic and grant access to the entire world except the specified target,
         so they are not restrictive.
+        Also validates that condition values are not wildcards ('*').
         """
         if not isinstance(condition, dict) or not condition:
             return False
@@ -80,11 +92,13 @@ class S3PublicAccessCheck(BaseCheck):
                 continue
 
             if isinstance(keys, dict):
-                for key in keys.keys():
+                for key, val in keys.items():
                     key_lower = key.lower().strip()
-                    if key_lower in self.RESTRICTIVE_CONDITION_KEYS:
-                        return True
-                    if any(r_key in key_lower for r_key in self.RESTRICTIVE_CONDITION_KEYS):
+                    is_restrictive_key = (
+                        key_lower in self.RESTRICTIVE_CONDITION_KEYS
+                        or any(r_key in key_lower for r_key in self.RESTRICTIVE_CONDITION_KEYS)
+                    )
+                    if is_restrictive_key and not self._is_wildcard_condition_value(val):
                         return True
         return False
 
@@ -162,30 +176,45 @@ class S3PublicAccessCheck(BaseCheck):
         if not buckets:
             return []
 
+        # Session cache for bucket regions to prevent redundant Describe/Location calls
+        cached_locations = getattr(session, "_cloudsentinel_bucket_locations", None)
+        if not isinstance(cached_locations, dict):
+            cached_locations = {}
+            try:
+                session._cloudsentinel_bucket_locations = cached_locations
+            except Exception:
+                pass
+
+        default_reg = getattr(session, "region_name", "us-east-1") or "us-east-1"
+        regional_clients: Dict[str, Any] = {default_reg: s3}
+
         for b in buckets:
             bucket_name = b["Name"]
             bucket_arn = f"arn:aws:s3:::{bucket_name}"
-            region = "us-east-1"
+            region = cached_locations.get(bucket_name, "us-east-1")
 
-            # Check Bucket Region / Location (fallback gracefully if location query is denied)
-            try:
-                loc_resp = s3.get_bucket_location(Bucket=bucket_name)
-                loc = loc_resp.get("LocationConstraint")
-                if loc:
-                    region = "eu-west-1" if loc == "EU" else loc
-            except botocore.exceptions.ClientError as e:
-                err_code = e.response.get("Error", {}).get("Code", "")
-                if err_code in self.ACCESS_DENIED_CODES:
-                    # Do not abort bucket audit if only location is denied; default to us-east-1 and continue
-                    region = "us-east-1"
-                else:
-                    region = "us-east-1"
+            if bucket_name not in cached_locations:
+                # Check Bucket Region / Location (fallback gracefully if location query is denied)
+                try:
+                    loc_resp = s3.get_bucket_location(Bucket=bucket_name)
+                    loc = loc_resp.get("LocationConstraint")
+                    if loc:
+                        region = "eu-west-1" if loc == "EU" else loc
+                except botocore.exceptions.ClientError as e:
+                    err_code = e.response.get("Error", {}).get("Code", "")
+                    if err_code in self.ACCESS_DENIED_CODES:
+                        region = "us-east-1"
+                    else:
+                        region = "us-east-1"
+                cached_locations[bucket_name] = region
 
-            # Use regional client to prevent 301 PermanentRedirect on non-us-east-1 buckets
-            try:
-                bucket_s3 = session.client("s3", region_name=region)
-            except Exception:
-                bucket_s3 = s3
+            # Reuse regional client from cache
+            if region not in regional_clients:
+                try:
+                    regional_clients[region] = session.client("s3", region_name=region)
+                except Exception:
+                    regional_clients[region] = s3
+            bucket_s3 = regional_clients[region]
 
             # Check Public Access Block
             pab_failures = []
@@ -248,10 +277,14 @@ class S3PublicAccessCheck(BaseCheck):
                     effect = stmt.get("Effect", "")
                     if effect.lower() == "allow":
                         principal = stmt.get("Principal")
-                        if self._is_wildcard_principal(principal):
+                        has_not_principal = "NotPrincipal" in stmt
+                        is_wildcard_p = self._is_wildcard_principal(principal)
+                        if is_wildcard_p or has_not_principal:
                             condition = stmt.get("Condition")
                             if not self._has_restrictive_condition(condition, effect=effect):
                                 sid = stmt.get("Sid", f"Statement[{idx}]")
+                                if has_not_principal:
+                                    sid = f"{sid} (NotPrincipal)"
                                 public_policy_statements.append(sid)
             except botocore.exceptions.ClientError as e:
                 err_code = e.response.get("Error", {}).get("Code", "")

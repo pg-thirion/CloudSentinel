@@ -7,6 +7,32 @@ from enum import Enum
 from typing import List, Dict, Any, Optional
 import uuid
 import datetime
+import re
+
+
+class CredentialProtector:
+    """Ensures no AWS secret keys, session tokens, or sensitive values leak in logs or output."""
+    PREFIX_PATTERNS = [
+        re.compile(
+            r'([\"\'\s]?(?:aws_)?(?:secret_?access_?key|session_?token)[\"\'\s]?\s*[:=]\s*[\"\']?)([^\s\"\'},]+)',
+            re.IGNORECASE,
+        ),
+    ]
+    KEY_PATTERNS = [
+        re.compile(r'\b(AKIA[0-9A-Z]{16})\b', re.IGNORECASE),
+        re.compile(r'\b(ASIA[0-9A-Z]{16})\b', re.IGNORECASE),
+    ]
+
+    @classmethod
+    def redact(cls, text: str) -> str:
+        if not text:
+            return ""
+        redacted = text
+        for pattern in cls.PREFIX_PATTERNS:
+            redacted = pattern.sub(r'\g<1>[REDACTED]', redacted)
+        for pattern in cls.KEY_PATTERNS:
+            redacted = pattern.sub(r'[REDACTED]', redacted)
+        return redacted
 
 
 class Severity(str, Enum):

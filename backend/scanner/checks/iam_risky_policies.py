@@ -37,7 +37,7 @@ PRIVESC_RULES = [
         "type": "combo",
         "required_action_groups": [
             ["iam:passrole"],
-            ["ec2:runinstances", "ec2:*", "*"]
+            ["ec2:runinstances"]
         ],
     },
     {
@@ -47,7 +47,7 @@ PRIVESC_RULES = [
         "type": "combo",
         "required_action_groups": [
             ["iam:passrole"],
-            ["lambda:createfunction", "lambda:createeventsourcemapping", "lambda:*", "*"]
+            ["lambda:createfunction", "lambda:createeventsourcemapping"]
         ],
     },
     {
@@ -178,21 +178,7 @@ class IAMRiskyPoliciesCheck(BaseCheck):
             raise
 
         if not policies:
-            return [
-                Finding(
-                    check_id="iam_policy_least_privilege",
-                    check_title="Ensure IAM Policies Follow Least Privilege",
-                    service=self.service,
-                    severity=self.severity,
-                    status=Status.PASS,
-                    status_extended="No customer managed IAM policies found in this AWS account.",
-                    resource_id="no-customer-policies",
-                    resource_arn="arn:aws:iam:::policy/none",
-                    region="global",
-                    remediation=self._build_compliant_remediation("No customer managed policies"),
-                    compliance=self.compliance,
-                )
-            ]
+            return []
 
         # 2. Inspect each policy document
         for policy in policies:

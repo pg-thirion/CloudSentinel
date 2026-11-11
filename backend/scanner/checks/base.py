@@ -5,7 +5,7 @@ Defines standard contract for all security checks with automatic ClientError / A
 from abc import ABC, abstractmethod
 from typing import List
 import botocore.exceptions
-from ..models import Finding, Severity, Status, Remediation
+from ..models import Finding, Severity, Status, Remediation, CredentialProtector
 
 
 class BaseCheck(ABC):
@@ -18,11 +18,7 @@ class BaseCheck(ABC):
     @staticmethod
     def _redact(text: str) -> str:
         """Sanitize error messages to prevent AWS credential leakage."""
-        try:
-            from ..engine import CredentialProtector
-            return CredentialProtector.redact(text)
-        except Exception:
-            return text
+        return CredentialProtector.redact(text)
 
     @abstractmethod
     def run_check(self, session, **kwargs) -> List[Finding]:

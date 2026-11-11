@@ -102,7 +102,18 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         try:
             # Attempt real scan with read-only boto3 session
             session = boto3.Session()
-            engine = CloudSentinelEngine(session=session)
+
+            # Regional scoping to ensure API Gateway synchronous response completes safely within 30s limit
+            regions_param = query_params.get("regions")
+            full_scan = query_params.get("full_scan", "false").lower() in ("true", "1")
+            if full_scan:
+                target_regions = None
+            elif regions_param:
+                target_regions = [r.strip() for r in regions_param.split(",") if r.strip()]
+            else:
+                target_regions = [session.region_name or "us-east-1"]
+
+            engine = CloudSentinelEngine(session=session, target_regions=target_regions)
             
             # First verify caller identity (read-only verification)
             caller_info = engine.verify_read_only_access()

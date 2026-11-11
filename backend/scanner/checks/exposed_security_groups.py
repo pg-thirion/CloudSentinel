@@ -80,8 +80,15 @@ class ExposedSecurityGroupsCheck(BaseCheck):
         "PCI-DSS-4.0:1.3.1",
     ]
 
+    def __init__(self, regions: Optional[List[str]] = None):
+        self.regions = regions
+
     def _get_active_regions(self, session) -> List[str]:
-        """Retrieve active/opted-in AWS regions across the account."""
+        """Retrieve active/opted-in AWS regions across the account, using session cache if available."""
+        cached_regions = getattr(session, "_cloudsentinel_active_regions", None)
+        if isinstance(cached_regions, list) and cached_regions:
+            return cached_regions
+
         session_region = getattr(session, "region_name", None) or "us-east-1"
         try:
             ec2 = session.client("ec2", region_name=session_region)
@@ -89,9 +96,15 @@ class ExposedSecurityGroupsCheck(BaseCheck):
                 Filters=[{"Name": "opt-in-status", "Values": ["opt-in-not-required", "opted-in"]}]
             )
             regions = [r["RegionName"] for r in resp.get("Regions", []) if "RegionName" in r]
-            return sorted(regions) if regions else [session_region]
+            result = sorted(regions) if regions else [session_region]
         except Exception:
-            return [session_region]
+            result = [session_region]
+
+        try:
+            session._cloudsentinel_active_regions = result
+        except Exception:
+            pass
+        return result
 
     def run_check(self, session, group_ids: Optional[List[str]] = None, regions: Optional[List[str]] = None) -> List[Finding]:
         if group_ids:

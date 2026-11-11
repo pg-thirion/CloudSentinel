@@ -176,27 +176,41 @@ class S3DefaultEncryptionCheck(BaseCheck):
             raise
 
         buckets = buckets_resp.get("Buckets", [])
+        cached_locations = getattr(session, "_cloudsentinel_bucket_locations", None)
+        if not isinstance(cached_locations, dict):
+            cached_locations = {}
+            try:
+                session._cloudsentinel_bucket_locations = cached_locations
+            except Exception:
+                pass
+
+        regional_s3_clients: Dict[str, Any] = {default_region: s3}
+
         for b in buckets:
             bucket_name = b["Name"]
             bucket_arn = f"arn:aws:s3:::{bucket_name}"
-            region = default_region
+            region = cached_locations.get(bucket_name)
 
-            # Determine region if possible
-            try:
-                loc_resp = s3.get_bucket_location(Bucket=bucket_name)
-                loc = loc_resp.get("LocationConstraint")
-                if loc:
-                    region = "eu-west-1" if loc == "EU" else loc
-                else:
-                    region = "us-east-1"
-            except botocore.exceptions.ClientError:
-                pass
+            if not region:
+                # Determine region if possible
+                try:
+                    loc_resp = s3.get_bucket_location(Bucket=bucket_name)
+                    loc = loc_resp.get("LocationConstraint")
+                    if loc:
+                        region = "eu-west-1" if loc == "EU" else loc
+                    else:
+                        region = "us-east-1"
+                except botocore.exceptions.ClientError:
+                    region = default_region
+                cached_locations[bucket_name] = region
 
-            # Use regional client to prevent 301 PermanentRedirect on non-us-east-1 buckets
-            try:
-                bucket_s3 = session.client("s3", region_name=region)
-            except Exception:
-                bucket_s3 = s3
+            # Reuse regional client from cache to prevent 301 PermanentRedirect
+            if region not in regional_s3_clients:
+                try:
+                    regional_s3_clients[region] = session.client("s3", region_name=region)
+                except Exception:
+                    regional_s3_clients[region] = s3
+            bucket_s3 = regional_s3_clients[region]
 
             # Inspect default encryption configuration
             try:
@@ -418,7 +432,7 @@ class EBSVolumeEncryptionCheck(BaseCheck):
             for vol in volumes:
                 vol_id = vol.get("VolumeId", "unknown-volume")
                 az = vol.get("AvailabilityZone", f"{reg}a")
-                vol_region = az[:-1] if az and az[-1].isalpha() else reg
+                vol_region = reg
                 vol_arn = f"arn:aws:ec2:{vol_region}:{account_id}:volume/{vol_id}"
                 encrypted = vol.get("Encrypted", False)
                 size = vol.get("Size", 20)
